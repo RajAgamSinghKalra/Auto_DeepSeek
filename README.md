@@ -40,6 +40,12 @@ Create a Python script that prints numbers from 1 to 10.
 
 AutoDeepSeek will plan the steps, write files and run code until the task is done. All files are saved in the `autodeepseek_workspace` folder. Use `exit` to stop the program.
 
+> **Note**
+> File operations are intentionally restricted to this workspace directory for
+> security. If you ask the agent to create something on your Desktop or another
+> absolute path, the file will still be created inside `autodeepseek_workspace`.
+> You can move or copy it elsewhere afterwards.
+
 ### Optional GUI
 
 A simple graphical interface is available:
@@ -59,3 +65,11 @@ python3 test_autodeepseek.py
 ```
 
 This launches a few basic checks of the main features.
+
+### Troubleshooting
+
+- **NumPy compatibility errors**: If you see a warning like
+  `A module that was compiled using NumPy 1.x cannot be run in NumPy 2.x`,
+  downgrade NumPy with `pip install 'numpy<2.0'`.
+- **Browser initialization failure**: The agent uses Firefox via Selenium.
+  Make sure Firefox is installed and working if you want browsing features.

@@ -408,6 +408,7 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         
         iteration = 0
         task_complete = False
+        action_failed = False
         results = []
         
         self.reset_abort()
@@ -434,14 +435,20 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
                         result["iteration"] = iteration
                         result["reasoning"] = action_data.get("reasoning", "")
                         results.append(result)
-                        
+                        if not result.get("success", False):
+                            action_failed = True
+
                         print(f"\nIteration {iteration}:")
                         print(f"Action: {action_data['action']}")
                         print(f"Reasoning: {result['reasoning']}")
                         print(f"Result: {result.get('message', result.get('stdout', 'Success'))}")
-                        
+
                         # Check if task is marked as complete
-                        if "complete" in action_data and action_data["complete"]:
+                        if (
+                            "complete" in action_data
+                            and action_data["complete"]
+                            and result.get("success", False)
+                        ):
                             task_complete = True
                     else:
                         # Regular response, check for completion indicators
@@ -492,11 +499,15 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         if self.abort_flag:
             task_complete = False
             self.logger.info("Task aborted by user")
+        if action_failed and task_complete:
+            task_complete = False
         
         # Generate summary
         summary = f"Task: {task}\nCompleted in {iteration} iterations\n"
         if self.abort_flag:
             summary += "Status: ABORTED by user\n"
+        elif action_failed:
+            summary += "Status: ERROR - Some actions failed\n"
         elif task_complete:
             summary += "Status: SUCCESS - Task completed successfully\n"
         else:
