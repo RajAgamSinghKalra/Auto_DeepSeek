@@ -36,7 +36,7 @@ def check_system():
         return False
     
     # Check Python version
-    if sys.version_info < (3.8, 0):
+    if sys.version_info < (3, 8):
         print("❌ Python 3.8+ required")
         return False
     
