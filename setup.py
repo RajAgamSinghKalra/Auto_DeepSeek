@@ -36,7 +36,8 @@ def check_system():
         return False
     
     # Check Python version
-    if sys.version_info < (3, 8):
+    # Compare only major and minor numbers to avoid TypeError
+    if sys.version_info[:2] < (3, 8):
         print("❌ Python 3.8+ required")
         return False
     
