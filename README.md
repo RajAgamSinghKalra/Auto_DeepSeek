@@ -28,8 +28,9 @@ AutoDeepSeek Agent
 
 ## 📋 Prerequisites
 
-- **Operating System**: Linux (Ubuntu 20.04+ recommended)
-- **Hardware**: AMD GPU (RX 6800 XT or better) for optimal performance
+- **Operating System**: Linux (Ubuntu 20.04+ recommended). Windows is supported
+  with CPU fallback if no compatible NVIDIA GPU is present.
+- **Hardware**: AMD GPU (RX 6800 XT or better) on Linux for best performance
 - **Python**: 3.8 or higher
 - **Memory**: 16GB RAM minimum, 32GB recommended
 - **Storage**: 50GB free space for models and workspace
@@ -127,6 +128,14 @@ Start the interactive agent:
 
 ```bash
 ./run_autodeepseek.sh
+```
+
+### GUI Interface
+
+Launch the simple graphical interface:
+
+```bash
+python3 gui.py
 ```
 
 ### Example Tasks
@@ -379,3 +388,4 @@ Results summary:
 ```
 
 Ready to give your AutoDeepSeek agent a task? 🚀
+
