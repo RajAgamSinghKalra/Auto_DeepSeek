@@ -35,6 +35,7 @@ class AutoDeepSeek:
     def __init__(self, model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"):
         """Initialize AutoDeepSeek agent"""
         self.model_path = model_path
+        self._setup_logging()
         self.device = self._setup_device()
         self.model = None
         self.tokenizer = None
@@ -42,9 +43,8 @@ class AutoDeepSeek:
         self.workspace_dir = Path("./autodeepseek_workspace")
         self.conversation_history = []
         self.max_iterations = 10
+        self.abort_flag = False
         
-        # Setup logging
-        self._setup_logging()
         
         # Create workspace
         self.workspace_dir.mkdir(exist_ok=True)
@@ -52,8 +52,16 @@ class AutoDeepSeek:
         # Initialize components
         self._load_model()
         self._setup_browser()
-        
+
         self.logger.info("AutoDeepSeek initialized successfully")
+
+    def request_abort(self):
+        """Signal the agent to abort the current task."""
+        self.abort_flag = True
+
+    def reset_abort(self):
+        """Clear any abort flags before starting a new task."""
+        self.abort_flag = False
 
     def _setup_logging(self):
         """Setup logging configuration"""
@@ -71,14 +79,19 @@ class AutoDeepSeek:
         self.logger = logging.getLogger("AutoDeepSeek")
 
     def _setup_device(self) -> str:
-        """Setup CUDA/ROCm device for GPU acceleration"""
+        """Determine the best device to run the model on."""
+        import platform
+
         if torch.cuda.is_available():
-            device = "cuda"
             self.logger.info(f"Using GPU: {torch.cuda.get_device_name()}")
-        else:
-            device = "cpu"
-            self.logger.warning("GPU not available, using CPU")
-        return device
+            return "cuda"
+
+        if platform.system() == "Windows":
+            self.logger.info("No compatible GPU detected on Windows, using CPU")
+            return "cpu"
+
+        self.logger.warning("GPU not available, using CPU")
+        return "cpu"
 
     def _load_model(self):
         """Load DeepSeek model and tokenizer"""
@@ -205,7 +218,9 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
     def write_file(self, filepath: str, content: str) -> Dict[str, Any]:
         """Write content to a file"""
         try:
-            file_path = self.workspace_dir / filepath
+            file_path = (self.workspace_dir / filepath).resolve()
+            if not str(file_path).startswith(str(self.workspace_dir.resolve())):
+                raise ValueError("Attempted write outside workspace")
             file_path.parent.mkdir(parents=True, exist_ok=True)
             
             with open(file_path, 'w', encoding='utf-8') as f:
@@ -222,7 +237,9 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
     def read_file(self, filepath: str) -> Dict[str, Any]:
         """Read content from a file"""
         try:
-            file_path = self.workspace_dir / filepath
+            file_path = (self.workspace_dir / filepath).resolve()
+            if not str(file_path).startswith(str(self.workspace_dir.resolve())):
+                raise ValueError("Attempted read outside workspace")
             
             if not file_path.exists():
                 return {"success": False, "message": f"File {filepath} does not exist"}
@@ -393,7 +410,8 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         task_complete = False
         results = []
         
-        while iteration < self.max_iterations and not task_complete:
+        self.reset_abort()
+        while iteration < self.max_iterations and not task_complete and not self.abort_flag:
             iteration += 1
             self.logger.info(f"Task iteration {iteration}/{self.max_iterations}")
             
@@ -470,10 +488,16 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
             "assistant": f"Task completed in {iteration} iterations",
             "results": results
         })
+
+        if self.abort_flag:
+            task_complete = False
+            self.logger.info("Task aborted by user")
         
         # Generate summary
         summary = f"Task: {task}\nCompleted in {iteration} iterations\n"
-        if task_complete:
+        if self.abort_flag:
+            summary += "Status: ABORTED by user\n"
+        elif task_complete:
             summary += "Status: SUCCESS - Task completed successfully\n"
         else:
             summary += "Status: INCOMPLETE - Reached maximum iterations\n"
