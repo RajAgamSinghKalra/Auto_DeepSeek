@@ -16,8 +16,14 @@ def run_command(command, description=""):
     print(f"Running: {command}")
     
     try:
-        result = subprocess.run(command, shell=True, check=True, 
-                              capture_output=True, text=True)
+        result = subprocess.run(
+            command,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            executable="/bin/bash",
+        )
         print("✅ Success")
         return True
     except subprocess.CalledProcessError as e:
