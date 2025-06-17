@@ -28,7 +28,7 @@ def test_basic_functionality():
     try:
         # Initialize agent
         print("1. Initializing AutoDeepSeek...")
-        agent = AutoDeepSeek()
+        agent = AutoDeepSeek(full_access=True)
         print("✅ AutoDeepSeek initialized successfully")
         
         # Test file operations
@@ -99,7 +99,7 @@ def test_task_completion():
     print("="*40)
     
     try:
-        agent = AutoDeepSeek()
+        agent = AutoDeepSeek(full_access=True)
         
         # Simple coding task
         task = """Create a Python function that calculates the factorial of a number, 
@@ -177,7 +177,7 @@ def run_performance_test():
     print("="*40)
     
     try:
-        agent = AutoDeepSeek()
+        agent = AutoDeepSeek(full_access=True)
         
         # Test model loading time
         start_time = time.time()

@@ -145,6 +145,9 @@ print_header "🤖 Launching AutoDeepSeek Agent..."
 print_status "Workspace: $workspace_dir"
 print_status "Logs: ./logs/"
 print_status "Model cache: $HF_HOME"
+if [ "${FULL_ACCESS}" = "true" ]; then
+    print_warning "Full system access ENABLED"
+fi
 
 # Add some helpful tips
 echo
