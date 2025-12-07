@@ -8,15 +8,14 @@ anything on startup.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
 from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent
-from typing import List, Optional, Sequence
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from colorama import Fore, Style, init as color_init
@@ -31,6 +30,11 @@ SUPPORTED_MODELS: List[str] = [
     "meta-llama/Llama-3.1-8B-Instruct",
     "mistralai/Mistral-7B-Instruct-v0.3",
     "NousResearch/Meta-Llama-3-8B-Instruct",
+]
+
+REQUIRED_PACKAGES = ["torch", "transformers", "selenium", "requests", "psutil", "GPUtil"]
+
+
 @dataclass
 class EnvironmentCandidate:
     name: str
@@ -62,6 +66,9 @@ class InstallStep:
 @dataclass
 class InstallationReport:
     ready: bool
+    missing_packages: List[str]
+    has_firefox: bool
+    notes: List[str]
     environments: List[EnvironmentStatus]
     target_environment: EnvironmentStatus
     requirement_specs: Dict[str, Requirement]
@@ -72,6 +79,8 @@ MODEL_CACHE_DIR = Path.home() / ".cache" / "huggingface" / "hub"
 
 def has_package(pkg: str) -> bool:
     return importlib.util.find_spec(pkg) is not None
+
+
 def _load_requirement_specs() -> Dict[str, Requirement]:
     req_path = Path(__file__).parent / "requirements.txt"
     specs: Dict[str, Requirement] = {}
@@ -149,8 +158,6 @@ def _discover_environment_candidates() -> List[EnvironmentCandidate]:
                 [conda_exe, "env", "list", "--json"], capture_output=True, text=True, check=True
             )
             envs = conda_info.stdout
-            import json
-
             env_data = json.loads(envs)
             for env_path in env_data.get("envs", []):
                 python_candidate = _python_from_env_dir(Path(env_path))
@@ -167,7 +174,10 @@ def _evaluate_environment(candidate: EnvironmentCandidate, requirement_names: Li
     missing: List[str] = list(requirement_names)
 
     if candidate.exists:
-        probe_script = "import importlib.util, sys; pkgs=sys.argv[1:]; present=[p for p in pkgs if importlib.util.find_spec(p)]; missing=[p for p in pkgs if p not in present]; print('\\n'.join([','.join(present), ','.join(missing)]))"
+        probe_script = (
+            "import importlib.util, sys; pkgs=sys.argv[1:]; present=[p for p in pkgs if importlib.util.find_spec(p)];"
+            " missing=[p for p in pkgs if p not in present]; print('\\n'.join([','.join(present), ','.join(missing)]))"
+        )
         try:
             result = subprocess.run(
                 [str(candidate.python_path), "-c", probe_script, *requirement_names],
@@ -220,7 +230,6 @@ def _map_missing_specs(specs: Dict[str, Requirement], missing_names: List[str]) 
 
 
 def check_installation() -> InstallationReport:
-    missing = [pkg for pkg in REQUIRED_PACKAGES if not has_package(pkg)]
     requirement_specs = _load_requirement_specs()
     requirement_names = list(requirement_specs.keys()) or REQUIRED_PACKAGES
 
@@ -228,7 +237,7 @@ def check_installation() -> InstallationReport:
     statuses = [_evaluate_environment(candidate, requirement_names) for candidate in candidates]
 
     target = _select_target_environment(statuses, requirement_names)
-    if all(env.name != target.name for env in statuses):
+    if all(env.name != target.name or env.origin != target.origin for env in statuses):
         statuses.append(target)
 
     missing = target.missing_packages or []
@@ -236,7 +245,6 @@ def check_installation() -> InstallationReport:
     notes: List[str] = []
     if not has_firefox:
         notes.append("Firefox not detected (required for browsing features)")
-    return InstallationReport(ready=not missing, missing_packages=missing, has_firefox=has_firefox, notes=notes)
 
     ready = target.exists and not missing
     if target.exists and missing:
@@ -269,7 +277,10 @@ def _rocm_steps() -> List[str]:
         "echo 'deb [arch=amd64] https://repo.radeon.com/rocm/apt/debian/ ubuntu main' | sudo tee /etc/apt/sources.list.d/rocm.list",
         "sudo apt update",
         "sudo apt install -y rocm-dkms rocm-libs rocm-dev rocm-utils",
-def build_install_plan(profile: SystemProfile) -> List[InstallStep]:
+        "sudo usermod -a -G render,video $USER",
+    ]
+
+
 def build_install_plan(profile: SystemProfile, report: InstallationReport) -> List[InstallStep]:
     steps: List[InstallStep] = []
 
@@ -281,6 +292,36 @@ def build_install_plan(profile: SystemProfile, report: InstallationReport) -> Li
                 note="Adapt these commands if you are not using an apt-based distribution.",
             )
         )
+        if profile.gpu and profile.gpu.vendor == "AMD":
+            steps.append(InstallStep(name="ROCm drivers", commands=_rocm_steps(), note="Reboot after installation."))
+        elif profile.gpu and profile.gpu.vendor == "NVIDIA":
+            steps.append(
+                InstallStep(
+                    name="NVIDIA drivers",
+                    commands=["sudo apt install -y nvidia-driver-550 || sudo ubuntu-drivers autoinstall"],
+                    note="Install CUDA toolkit separately if you need specific versions.",
+                )
+            )
+    elif profile.os_name == "Windows":
+        steps.append(
+            InstallStep(
+                name="Install prerequisites with Chocolatey",
+                commands=[
+                    "choco install -y python git firefox",
+                    "choco install -y cuda --pre || echo 'Install CUDA manually if needed'",
+                ],
+                note="Run from an elevated PowerShell prompt.",
+            )
+        )
+    elif profile.os_name == "Darwin":
+        steps.append(
+            InstallStep(
+                name="Install prerequisites with Homebrew",
+                commands=["brew update", "brew install python git firefox"],
+                note="Apple Silicon devices use MPS acceleration automatically when PyTorch supports it.",
+            )
+        )
+
     target_env = report.target_environment
     target_root = _environment_root_from_python(target_env.python_path)
     missing_specs = _map_missing_specs(report.requirement_specs, target_env.missing_packages) or target_env.missing_packages
@@ -302,13 +343,6 @@ def build_install_plan(profile: SystemProfile, report: InstallationReport) -> Li
     steps.append(
         InstallStep(
             name="Python environment",
-            commands=[
-                f"{sys.executable} -m venv venv",
-                "source venv/bin/activate" if profile.os_name != "Windows" else ".\\venv\\Scripts\\activate",
-                "pip install -U pip",
-                "pip install -r requirements.txt",
-            ],
-            note="Run in your project root. The commands are executed sequentially inside this TUI when approved.",
             commands=env_setup_commands,
             note=(
                 f"Target environment: {target_env.name}. Commands run directly with its python executable"
@@ -324,6 +358,23 @@ def build_install_plan(profile: SystemProfile, report: InstallationReport) -> Li
                 f"{sys.executable} - <<'PY'\nimport torch;print('CUDA', torch.cuda.is_available());print('MPS', getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available())\nPY"
             ],
             note="Ensure the reported backend matches your hardware.",
+        )
+    )
+
+    return steps
+
+
+def run_commands(commands: Sequence[str]) -> None:
+    for command in commands:
+        print(f"\n{Fore.CYAN}→ {command}{Style.RESET_ALL}")
+        try:
+            subprocess.run(command, shell=True, check=True)
+            print(f"{Fore.GREEN}✓ Success{Style.RESET_ALL}")
+        except subprocess.CalledProcessError as exc:
+            print(f"{Fore.RED}✗ Failed with code {exc.returncode}{Style.RESET_ALL}")
+            break
+
+
 def _render_environment_table(report: InstallationReport) -> str:
     total_requirements = len(report.requirement_specs) or len(REQUIRED_PACKAGES)
     lines = [f"{Fore.BLUE}{Style.BRIGHT}ENVIRONMENT SCAN › {len(report.environments)} candidates{Style.RESET_ALL}"]
@@ -401,8 +452,41 @@ def pick_model(current: Optional[str]) -> str:
     for idx, model in enumerate(SUPPORTED_MODELS, start=1):
         print(f"  [{idx}] {model}")
     print("  [C] Custom model ID")
-def guided_setup(profile: SystemProfile) -> None:
-    steps = build_install_plan(profile)
+    choice = input("Select a model: ").strip().lower()
+    if choice == "c":
+        custom = input("Enter a Hugging Face model ID: ").strip()
+        return custom or current or SUPPORTED_MODELS[0]
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(SUPPORTED_MODELS):
+            return SUPPORTED_MODELS[idx]
+    except ValueError:
+        pass
+    print("Keeping current selection.")
+    return current or SUPPORTED_MODELS[0]
+
+
+def install_model(model_id: str) -> None:
+    print(f"\nPreparing to download model: {model_id}")
+    confirm = input("This may be large. Proceed? [y/N] ").strip().lower()
+    if confirm != "y":
+        print("Skipping model download.")
+        return
+    try:
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+    except ImportError:
+        print("Transformers is not installed. Please finish setup first.")
+        return
+
+    cache_dir = MODEL_CACHE_DIR
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    print("Downloading tokenizer...")
+    AutoTokenizer.from_pretrained(model_id, cache_dir=cache_dir, trust_remote_code=True)
+    print("Downloading model weights... (this can take a while)")
+    AutoModelForCausalLM.from_pretrained(model_id, cache_dir=cache_dir, trust_remote_code=True)
+    print(f"{Fore.GREEN}Model cached successfully.{Style.RESET_ALL}")
+
+
 def guided_setup(profile: SystemProfile, report: InstallationReport) -> None:
     steps = build_install_plan(profile, report)
     print("\nSetup steps tailored to your system:")
@@ -415,7 +499,33 @@ def guided_setup(profile: SystemProfile, report: InstallationReport) -> None:
         choice = input("Run this step now? [y/N] ").strip().lower()
         if choice == "y":
             run_commands(step.commands)
-            guided_setup(profile)
+        else:
+            print("Skipped.")
+
+
+def launch_agent(selected_model: Optional[str]) -> None:
+    if not selected_model:
+        print("Select a model first from the LLM menu.")
+        return
+    cmd = [sys.executable, "autodeepseek.py", "--model", selected_model]
+    print(f"\nLaunching agent with command: {' '.join(cmd)}")
+    subprocess.run(cmd)
+
+
+def main() -> int:
+    profile = detect_system_profile()
+    status = check_installation()
+    selected_model: Optional[str] = None
+
+    while True:
+        show_menu(status, selected_model)
+        choice = input("Choose an option: ").strip()
+
+        if choice == "1":
+            print("\nDetected system profile:\n")
+            print(describe_profile(profile))
+            input("\nPress Enter to return to menu...")
+        elif choice == "2":
             guided_setup(profile, status)
             status = check_installation()
         elif choice == "3":
@@ -427,3 +537,20 @@ def guided_setup(profile: SystemProfile, report: InstallationReport) -> None:
             if install_prompt == "y":
                 install_model(selected_model)
         elif choice == "5":
+            if not status.ready:
+                print("Environment not ready. Resolve missing packages first.")
+                continue
+            launch_agent(selected_model)
+        elif choice == "0":
+            print("Exiting TUI. Goodbye!")
+            return 0
+        else:
+            print("Invalid option. Try again.")
+
+
+def cli_entry() -> None:
+    sys.exit(main())
+
+
+if __name__ == "__main__":
+    cli_entry()
