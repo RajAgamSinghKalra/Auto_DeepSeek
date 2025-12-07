@@ -21,6 +21,17 @@ pandas>=2.0.0
 python-dotenv>=1.0.0
 tqdm>=4.65.0
 colorama>=0.4.6
+<<<<<<< ours
+<<<<<<< ours
+<<<<<<< ours
+prompt-toolkit>=3.0.48
+=======
+packaging>=23.0
+>>>>>>> theirs
+=======
+>>>>>>> theirs
+=======
+>>>>>>> theirs
 
 # Optional: For advanced features
 # opencv-python>=4.8.0  # For image processing
