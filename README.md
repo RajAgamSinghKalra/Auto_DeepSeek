@@ -1,6 +1,6 @@
 # AutoDeepSeek
 
-AutoDeepSeek is an autonomous assistant powered by the DeepSeek-R1 7B model. The agent can create and run code, manage files and browse the web to complete tasks you describe. It works best on Linux with an AMD GPU (ROCm), but it can fall back to CPU if needed.
+AutoDeepSeek is an autonomous assistant powered by the DeepSeek-R1 7B model. The agent can create and run code, manage files and browse the web to complete tasks you describe. It now includes a cross-platform terminal UI that detects your OS/hardware, guides you through setup, and lets you pick which LLM to install and run. It works on Linux, Windows, and macOS with GPU acceleration (CUDA, ROCm, or Apple Silicon) when available, and will fall back to CPU if needed.
 
 ## Features
 
@@ -14,26 +14,25 @@ AutoDeepSeek is an autonomous assistant powered by the DeepSeek-R1 7B model. The
 
 ## Quick Start
 
-1. Install Linux (Ubuntu 20.04 or later is recommended). Having an AMD GPU speeds up the model but is optional.
-2. Clone this repository and enter the folder:
+1. Clone this repository and enter the folder:
    ```bash
    git clone https://github.com/yourusername/autodeepseek.git
    cd autodeepseek
    ```
-3. Run the setup script:
-   ```bash
-   python3 setup.py
-   ```
-   The script creates a virtual environment, installs dependencies, prepares Firefox and ROCm, and writes a `.env` configuration file. During this step you may be asked for your password to install system packages.
-4. Reboot your computer if the script tells you to.
-5. Start the agent:
+2. Launch the new TUI (this is now the first thing to run):
    ```bash
    ./run_autodeepseek.sh
    ```
+   The TUI will:
+   - Detect your OS and hardware (Linux/Windows/macOS, CPU/GPU type).
+   - Offer setup commands tailored to your platform (e.g., apt, Homebrew, or Chocolatey). Nothing installs unless you choose it.
+   - Show an indicator for missing dependencies.
+   - Let you pick an LLM from a curated list or enter a custom ID, then optionally download it on demand.
+3. From the TUI, choose **Launch AutoDeepSeek agent** after your environment is ready and a model is selected.
 
 ## Using the Agent
 
-When the launcher starts you will see a prompt. Type a task in plain language, for example:
+When the agent starts you will see a prompt. Type a task in plain language, for example:
 
 ```
 Create a Python script that prints numbers from 1 to 10.

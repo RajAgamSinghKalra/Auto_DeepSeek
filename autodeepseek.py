@@ -32,7 +32,13 @@ except ImportError as e:
     sys.exit(1)
 
 class AutoDeepSeek:
-    def __init__(self, model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", *, full_access: bool = False):
+    def __init__(
+        self,
+        model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+        *,
+        full_access: bool = False,
+        device_preference: str = "auto",
+    ):
         """Initialize AutoDeepSeek agent
 
         Parameters
@@ -46,6 +52,7 @@ class AutoDeepSeek:
         """
         self.model_path = model_path
         self.full_access = full_access
+        self.device_preference = device_preference
         self._setup_logging()
         self.device = self._setup_device()
         self.model = None
@@ -91,12 +98,33 @@ class AutoDeepSeek:
         self.logger = logging.getLogger("AutoDeepSeek")
 
     def _setup_device(self) -> str:
-        """Determine the best device to run the model on."""
+        """Determine the best device to run the model on respecting user preference."""
         import platform
 
-        if torch.cuda.is_available():
-            self.logger.info(f"Using GPU: {torch.cuda.get_device_name()}")
+        preference = self.device_preference.lower()
+
+        def mps_available() -> bool:
+            return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+        if preference == "cuda" and torch.cuda.is_available():
+            self.logger.info(f"Using CUDA GPU: {torch.cuda.get_device_name()}")
             return "cuda"
+
+        if preference == "mps" and mps_available():
+            self.logger.info("Using Apple Silicon (MPS)")
+            return "mps"
+
+        if preference == "cpu":
+            self.logger.info("Using CPU as requested")
+            return "cpu"
+
+        if torch.cuda.is_available():
+            self.logger.info(f"Auto-selected CUDA GPU: {torch.cuda.get_device_name()}")
+            return "cuda"
+
+        if mps_available():
+            self.logger.info("Auto-selected Apple Silicon (MPS)")
+            return "mps"
 
         if platform.system() == "Windows":
             self.logger.info("No compatible GPU detected on Windows, using CPU")
@@ -116,24 +144,25 @@ class AutoDeepSeek:
                 trust_remote_code=True
             )
             
-            # Load model with appropriate settings for ROCm/CUDA
+            # Load model with appropriate settings for ROCm/CUDA/MPS/CPU
+            dtype = torch.float16 if self.device != "cpu" else torch.float32
             model_kwargs = {
                 "trust_remote_code": True,
-                "torch_dtype": torch.float16,
+                "torch_dtype": dtype,
                 "low_cpu_mem_usage": True
             }
-            
+
             if self.device == "cuda":
                 model_kwargs["device_map"] = "auto"
-            
+
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_path,
                 **model_kwargs
             )
-            
-            if self.device == "cpu":
+
+            if self.device in ("cpu", "mps"):
                 self.model = self.model.to(self.device)
-            
+
             self.logger.info("Model loaded successfully")
             
         except Exception as e:
@@ -628,13 +657,24 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run AutoDeepSeek")
     parser.add_argument("--full-access", action="store_true", help="Allow file and command operations outside the workspace")
+    parser.add_argument("--model", default=os.getenv("MODEL_PATH", "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"), help="Hugging Face model ID to load")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cuda", "cpu", "mps"],
+        default=os.getenv("DEVICE", "auto"),
+        help="Preferred device backend",
+    )
     args = parser.parse_args()
 
     full_access_env = os.getenv("FULL_ACCESS", "false").lower() == "true"
 
     try:
         # Initialize agent
-        agent = AutoDeepSeek(full_access=args.full_access or full_access_env)
+        agent = AutoDeepSeek(
+            model_path=args.model,
+            full_access=args.full_access or full_access_env,
+            device_preference=args.device,
+        )
         
         print("\nAgent initialized successfully!")
         print("Type 'exit' to quit, 'help' for commands")
