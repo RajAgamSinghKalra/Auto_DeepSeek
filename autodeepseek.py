@@ -32,15 +32,27 @@ except ImportError as e:
     sys.exit(1)
 
 class AutoDeepSeek:
-    def __init__(self, model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B"):
-        """Initialize AutoDeepSeek agent"""
+    def __init__(self, model_path: str = "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", *, full_access: bool = False):
+        """Initialize AutoDeepSeek agent
+
+        Parameters
+        ----------
+        model_path: str
+            HuggingFace path of the DeepSeek model.
+        full_access: bool, optional
+            If True, file and command operations are not restricted to the
+            workspace directory. When enabled, files will be saved to the
+            user's Desktop if no path is provided.
+        """
         self.model_path = model_path
+        self.full_access = full_access
         self._setup_logging()
         self.device = self._setup_device()
         self.model = None
         self.tokenizer = None
         self.browser = None
         self.workspace_dir = Path("./autodeepseek_workspace")
+        self.default_save_dir = Path.home() / "Desktop"
         self.conversation_history = []
         self.max_iterations = 10
         self.abort_flag = False
@@ -186,7 +198,7 @@ class AutoDeepSeek:
         """Build prompt with conversation context and system instructions"""
         system_prompt = """You are AutoDeepSeek, an autonomous AI agent with full system access. You can:
 1. Write and execute code in any programming language
-2. Create, read, and modify files
+2. Create, read, modify or delete files
 3. Browse the internet using Firefox
 4. Run system commands
 5. Analyze and verify your work
@@ -195,8 +207,10 @@ When given a task, break it down into steps and execute them systematically.
 Always verify your work and iterate until the task is completed successfully.
 
 Available tools:
-- write_file(filepath, content): Write content to a file
+- write_file(filepath, content): Write content to a file. When no path is provided and full access is enabled, files are saved to the user's Desktop.
 - read_file(filepath): Read content from a file
+- append_file(filepath, content): Append text to a file
+- delete_file(filepath): Delete a file
 - execute_code(code, language): Execute code and return output
 - browse_web(url): Navigate to a webpage
 - search_web(query): Search the web
@@ -215,17 +229,29 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         
         return context
 
-    def write_file(self, filepath: str, content: str) -> Dict[str, Any]:
-        """Write content to a file"""
+    def write_file(self, filepath: Optional[str], content: str) -> Dict[str, Any]:
+        """Write content to a file. If no path is provided and full access is
+        enabled, the file is saved to the user's Desktop."""
         try:
-            file_path = (self.workspace_dir / filepath).resolve()
-            if not str(file_path).startswith(str(self.workspace_dir.resolve())):
+            if filepath:
+                file_path = Path(filepath).expanduser()
+            else:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                file_path = self.default_save_dir / f"autodeepseek_{timestamp}.txt"
+
+            if not file_path.is_absolute() and not self.full_access:
+                file_path = (self.workspace_dir / file_path).resolve()
+            elif not file_path.is_absolute():
+                file_path = (Path.cwd() / file_path).resolve()
+
+            if not self.full_access and not str(file_path).startswith(str(self.workspace_dir.resolve())):
                 raise ValueError("Attempted write outside workspace")
+
             file_path.parent.mkdir(parents=True, exist_ok=True)
-            
+
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            
+
             self.logger.info(f"File written: {file_path}")
             return {"success": True, "message": f"File written to {file_path}"}
             
@@ -237,13 +263,18 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
     def read_file(self, filepath: str) -> Dict[str, Any]:
         """Read content from a file"""
         try:
-            file_path = (self.workspace_dir / filepath).resolve()
-            if not str(file_path).startswith(str(self.workspace_dir.resolve())):
+            file_path = Path(filepath).expanduser()
+            if not file_path.is_absolute() and not self.full_access:
+                file_path = (self.workspace_dir / file_path).resolve()
+            elif not file_path.is_absolute():
+                file_path = (Path.cwd() / file_path).resolve()
+
+            if not self.full_access and not str(file_path).startswith(str(self.workspace_dir.resolve())):
                 raise ValueError("Attempted read outside workspace")
-            
+
             if not file_path.exists():
                 return {"success": False, "message": f"File {filepath} does not exist"}
-            
+
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             
@@ -252,6 +283,54 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
             
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {e}"
+            self.logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    def append_file(self, filepath: str, content: str) -> Dict[str, Any]:
+        """Append content to an existing file"""
+        try:
+            file_path = Path(filepath).expanduser()
+            if not file_path.is_absolute() and not self.full_access:
+                file_path = (self.workspace_dir / file_path).resolve()
+            elif not file_path.is_absolute():
+                file_path = (Path.cwd() / file_path).resolve()
+
+            if not self.full_access and not str(file_path).startswith(str(self.workspace_dir.resolve())):
+                raise ValueError("Attempted write outside workspace")
+
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(file_path, 'a', encoding='utf-8') as f:
+                f.write(content)
+
+            self.logger.info(f"File appended: {file_path}")
+            return {"success": True, "message": f"Content appended to {file_path}"}
+
+        except Exception as e:
+            error_msg = f"Error appending file {filepath}: {e}"
+            self.logger.error(error_msg)
+            return {"success": False, "message": error_msg}
+
+    def delete_file(self, filepath: str) -> Dict[str, Any]:
+        """Delete a file"""
+        try:
+            file_path = Path(filepath).expanduser()
+            if not file_path.is_absolute() and not self.full_access:
+                file_path = (self.workspace_dir / file_path).resolve()
+            elif not file_path.is_absolute():
+                file_path = (Path.cwd() / file_path).resolve()
+
+            if not self.full_access and not str(file_path).startswith(str(self.workspace_dir.resolve())):
+                raise ValueError("Attempted delete outside workspace")
+
+            if file_path.exists():
+                file_path.unlink()
+                self.logger.info(f"File deleted: {file_path}")
+                return {"success": True, "message": f"Deleted {file_path}"}
+            else:
+                return {"success": False, "message": f"File {filepath} does not exist"}
+
+        except Exception as e:
+            error_msg = f"Error deleting file {filepath}: {e}"
             self.logger.error(error_msg)
             return {"success": False, "message": error_msg}
 
@@ -279,12 +358,13 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
                 os.chmod(temp_file, 0o755)
             
             # Execute code
+            cwd = None if self.full_access else self.workspace_dir
             process = subprocess.run(
                 command,
                 capture_output=True,
                 text=True,
                 timeout=30,
-                cwd=self.workspace_dir
+                cwd=cwd
             )
             
             result = {
@@ -357,14 +437,15 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
             dangerous_commands = ['rm -rf', 'format', 'del /f', 'shutdown', 'reboot']
             if any(dangerous in command.lower() for dangerous in dangerous_commands):
                 return {"success": False, "message": "Dangerous command blocked"}
-            
+
+            cwd = None if self.full_access else self.workspace_dir
             process = subprocess.run(
                 command,
                 shell=True,
                 capture_output=True,
                 text=True,
                 timeout=30,
-                cwd=self.workspace_dir
+                cwd=cwd
             )
             
             result = {
@@ -391,6 +472,10 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
             return self.write_file(params.get("filepath"), params.get("content"))
         elif action == "read_file":
             return self.read_file(params.get("filepath"))
+        elif action == "append_file":
+            return self.append_file(params.get("filepath"), params.get("content"))
+        elif action == "delete_file":
+            return self.delete_file(params.get("filepath"))
         elif action == "execute_code":
             return self.execute_code(params.get("code"), params.get("language", "python"))
         elif action == "browse_web":
@@ -408,6 +493,7 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         
         iteration = 0
         task_complete = False
+        action_failed = False
         results = []
         
         self.reset_abort()
@@ -434,14 +520,20 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
                         result["iteration"] = iteration
                         result["reasoning"] = action_data.get("reasoning", "")
                         results.append(result)
-                        
+                        if not result.get("success", False):
+                            action_failed = True
+
                         print(f"\nIteration {iteration}:")
                         print(f"Action: {action_data['action']}")
                         print(f"Reasoning: {result['reasoning']}")
                         print(f"Result: {result.get('message', result.get('stdout', 'Success'))}")
-                        
+
                         # Check if task is marked as complete
-                        if "complete" in action_data and action_data["complete"]:
+                        if (
+                            "complete" in action_data
+                            and action_data["complete"]
+                            and result.get("success", False)
+                        ):
                             task_complete = True
                     else:
                         # Regular response, check for completion indicators
@@ -492,11 +584,15 @@ Format your responses as JSON with 'action', 'parameters', and 'reasoning' field
         if self.abort_flag:
             task_complete = False
             self.logger.info("Task aborted by user")
+        if action_failed and task_complete:
+            task_complete = False
         
         # Generate summary
         summary = f"Task: {task}\nCompleted in {iteration} iterations\n"
         if self.abort_flag:
             summary += "Status: ABORTED by user\n"
+        elif action_failed:
+            summary += "Status: ERROR - Some actions failed\n"
         elif task_complete:
             summary += "Status: SUCCESS - Task completed successfully\n"
         else:
@@ -527,10 +623,18 @@ def main():
     """Main function for command line usage"""
     print("🚀 AutoDeepSeek - Autonomous AI Agent")
     print("=====================================")
-    
+
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run AutoDeepSeek")
+    parser.add_argument("--full-access", action="store_true", help="Allow file and command operations outside the workspace")
+    args = parser.parse_args()
+
+    full_access_env = os.getenv("FULL_ACCESS", "false").lower() == "true"
+
     try:
         # Initialize agent
-        agent = AutoDeepSeek()
+        agent = AutoDeepSeek(full_access=args.full_access or full_access_env)
         
         print("\nAgent initialized successfully!")
         print("Type 'exit' to quit, 'help' for commands")

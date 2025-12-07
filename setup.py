@@ -16,8 +16,14 @@ def run_command(command, description=""):
     print(f"Running: {command}")
     
     try:
-        result = subprocess.run(command, shell=True, check=True, 
-                              capture_output=True, text=True)
+        result = subprocess.run(
+            command,
+            shell=True,
+            check=True,
+            capture_output=True,
+            text=True,
+            executable="/bin/bash",
+        )
         print("✅ Success")
         return True
     except subprocess.CalledProcessError as e:
@@ -36,7 +42,8 @@ def check_system():
         return False
     
     # Check Python version
-    if sys.version_info < (3.8, 0):
+    # Compare only major and minor numbers to avoid TypeError
+    if sys.version_info[:2] < (3, 8):
         print("❌ Python 3.8+ required")
         return False
     
@@ -93,8 +100,28 @@ def setup_firefox():
     # Download and setup geckodriver
     geckodriver_path = Path("/usr/local/bin/geckodriver")
     if not geckodriver_path.exists():
+        try:
+            import json
+            import urllib.request
+
+            # Fetch latest geckodriver release
+            with urllib.request.urlopen(
+                "https://api.github.com/repos/mozilla/geckodriver/releases/latest"
+            ) as resp:
+                data = json.load(resp)
+                version = data.get("tag_name", "")
+
+            tarball = f"geckodriver-{version}-linux64.tar.gz"
+            url = (
+                "https://github.com/mozilla/geckodriver/releases/download/"
+                f"{version}/{tarball}"
+            )
+        except Exception as e:
+            print(f"❌ Failed to determine geckodriver version: {e}")
+            return False
+
         commands = [
-            "wget -O /tmp/geckodriver.tar.gz https://github.com/mozilla/geckodriver/releases/latest/download/geckodriver-v0.33.0-linux64.tar.gz",
+            f"wget -O /tmp/geckodriver.tar.gz {url}",
             "cd /tmp && tar -xzf geckodriver.tar.gz",
             "sudo mv /tmp/geckodriver /usr/local/bin/",
             "sudo chmod +x /usr/local/bin/geckodriver"
