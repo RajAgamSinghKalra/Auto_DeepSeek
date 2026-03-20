@@ -4,6 +4,7 @@ from tkinter.scrolledtext import ScrolledText
 
 from autodeepseek import AutoDeepSeek
 
+
 class AutoDeepSeekGUI:
     def __init__(self, root):
         self.root = root
@@ -33,18 +34,18 @@ class AutoDeepSeekGUI:
         self.run_button.config(state=tk.DISABLED)
         self.abort_button.config(state=tk.NORMAL)
         self.output_area.insert(tk.END, f"> {task}\n")
-        self.task_thread = threading.Thread(target=self.execute_task, args=(task,))
+        self.task_thread = threading.Thread(target=self.execute_task, args=(task,), daemon=True)
         self.task_thread.start()
 
     def execute_task(self, task):
         try:
             result = self.agent.complete_task(task)
-            self.output_area.insert(tk.END, result + "\n")
+            self.root.after(0, lambda: self.output_area.insert(tk.END, result + "\n"))
         except Exception as e:
-            self.output_area.insert(tk.END, f"Error: {e}\n")
+            self.root.after(0, lambda: self.output_area.insert(tk.END, f"Error: {e}\n"))
         finally:
-            self.abort_button.config(state=tk.DISABLED)
-            self.run_button.config(state=tk.NORMAL)
+            self.root.after(0, lambda: self.abort_button.config(state=tk.DISABLED))
+            self.root.after(0, lambda: self.run_button.config(state=tk.NORMAL))
 
     def abort_task(self):
         if self.agent:

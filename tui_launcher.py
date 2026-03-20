@@ -57,10 +57,17 @@ from system_profile import SystemProfile, describe_profile, detect_system_profil
 color_init(autoreset=True)
 
 SUPPORTED_MODELS: List[str] = [
+    # Tier 1: Best for 8-16GB VRAM GPUs
+    "Qwen/Qwen2.5-Coder-7B-Instruct",
+    "Qwen/Qwen3-8B",
     "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
-    "meta-llama/Llama-3.1-8B-Instruct",
-    "mistralai/Mistral-7B-Instruct-v0.3",
-    "NousResearch/Meta-Llama-3-8B-Instruct",
+    # Tier 2: Better quality, need 16-24GB VRAM
+    "Qwen/Qwen2.5-Coder-14B-Instruct",
+    "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B",
+    "microsoft/Phi-4-reasoning",
+    # Tier 3: Best quality, need 24-48GB VRAM
+    "Qwen/Qwen2.5-Coder-32B-Instruct",
+    "bigcode/starcoder2-15b-instruct-v0.1",
 ]
 
 REQUIRED_PACKAGES = [
@@ -896,7 +903,6 @@ def build_app() -> Application:
     def _(event) -> None:
         event.app.exit(result=0)
 
-    global app
     app = Application(
         layout=Layout(layout_root, focused_element=getattr(nav, "buttons", [None])[0]),
         key_bindings=kb,

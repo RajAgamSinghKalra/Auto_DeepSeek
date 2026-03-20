@@ -90,7 +90,7 @@ def test_basic_functionality():
     finally:
         try:
             agent.cleanup()
-        except:
+        except Exception:
             pass
 
 def test_task_completion():
@@ -128,7 +128,7 @@ def test_task_completion():
     finally:
         try:
             agent.cleanup()
-        except:
+        except Exception:
             pass
 
 def test_system_info():
@@ -154,7 +154,7 @@ def test_system_info():
                 print("✅ ROCm available")
             else:
                 print("⚠️  ROCm not available")
-        except:
+        except Exception:
             print("⚠️  ROCm not available")
         
         # Check transformers
@@ -203,7 +203,7 @@ def run_performance_test():
     finally:
         try:
             agent.cleanup()
-        except:
+        except Exception:
             pass
 
 def main():
