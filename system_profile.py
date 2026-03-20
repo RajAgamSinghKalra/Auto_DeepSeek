@@ -73,6 +73,13 @@ def detect_system_profile() -> SystemProfile:
         if torch.backends.openmp.is_available() if hasattr(torch.backends, "openmp") else False:
             accelerators.append("CPU-Optimized")
 
+    # DirectML (AMD/Intel GPU on Windows)
+    try:
+        import torch_directml
+        accelerators.append("DirectML")
+    except ImportError:
+        pass
+
     if not accelerators:
         accelerators.append("CPU")
 

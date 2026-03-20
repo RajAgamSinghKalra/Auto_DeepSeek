@@ -28,3 +28,4 @@ packaging>=23.0
 # opencv-python>=4.8.0  # For image processing
 # Pillow>=10.0.0       # Image manipulation
 # sounddevice>=0.4.6   # Audio capabilities
+# torch-directml>=0.2.0  # AMD/Intel GPU on Windows via DirectX 12

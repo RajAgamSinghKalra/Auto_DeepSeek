@@ -36,6 +36,13 @@ except ImportError as e:
     print("Please run: pip install -r requirements.txt")
     sys.exit(1)
 
+# Optional: DirectML for AMD/Intel GPUs on Windows
+try:
+    import torch_directml
+    _DIRECTML_AVAILABLE = True
+except ImportError:
+    _DIRECTML_AVAILABLE = False
+
 # Load environment variables from .env if available
 try:
     from dotenv import load_dotenv
@@ -125,6 +132,7 @@ class AutoDeepSeek:
         self.execution_timeout = int(os.getenv("EXECUTION_TIMEOUT", "120"))
         self.abort_flag = False
         self._background_processes: Dict[str, subprocess.Popen] = {}
+        self._dml_device = None  # set later if using DirectML
 
         # Create workspace
         self.workspace_dir.mkdir(exist_ok=True)
@@ -171,31 +179,43 @@ class AutoDeepSeek:
         self.logger = logging.getLogger("AutoDeepSeek")
 
     def _setup_device(self) -> str:
-        """Determine the best device to run the model on."""
+        """Determine the best device to run the model on.
+
+        Priority (auto): CUDA → DirectML (Windows) → MPS (macOS) → CPU
+        """
         preference = self.device_preference.lower()
 
         def mps_available() -> bool:
             return hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
 
+        def directml_available() -> bool:
+            return _DIRECTML_AVAILABLE and platform.system() == "Windows"
+
+        # Explicit preference
         if preference == "cuda" and torch.cuda.is_available():
             self.logger.info(f"Using CUDA GPU: {torch.cuda.get_device_name()}")
             return "cuda"
+        if preference == "directml" and directml_available():
+            self.logger.info(f"Using DirectML (device 0)")
+            return "directml"
         if preference == "mps" and mps_available():
             self.logger.info("Using Apple Silicon (MPS)")
             return "mps"
         if preference == "cpu":
             self.logger.info("Using CPU as requested")
             return "cpu"
+
+        # Auto-detection cascade
         if torch.cuda.is_available():
             self.logger.info(f"Auto-selected CUDA GPU: {torch.cuda.get_device_name()}")
             return "cuda"
+        if directml_available():
+            self.logger.info("Auto-selected DirectML (AMD/Intel GPU via DirectX 12)")
+            return "directml"
         if mps_available():
             self.logger.info("Auto-selected Apple Silicon (MPS)")
             return "mps"
-        if platform.system() == "Windows":
-            self.logger.info("No compatible GPU detected on Windows, using CPU")
-            return "cpu"
-        self.logger.warning("GPU not available, using CPU")
+        self.logger.warning("No GPU backend available, using CPU")
         return "cpu"
 
     def _load_model(self):
@@ -208,7 +228,12 @@ class AutoDeepSeek:
                 trust_remote_code=True
             )
 
-            dtype = torch.float16 if self.device != "cpu" else torch.float32
+            # DirectML works with float32 or float16; CUDA/MPS use float16
+            if self.device == "cpu":
+                dtype = torch.float32
+            else:
+                dtype = torch.float16
+
             model_kwargs = {
                 "trust_remote_code": True,
                 "torch_dtype": dtype,
@@ -222,7 +247,11 @@ class AutoDeepSeek:
                 **model_kwargs
             )
 
-            if self.device in ("cpu", "mps"):
+            if self.device == "directml":
+                dml_device = torch_directml.device()
+                self.model = self.model.to(dml_device)
+                self._dml_device = dml_device  # store for tensor placement
+            elif self.device in ("cpu", "mps"):
                 self.model = self.model.to(self.device)
 
             self.logger.info("Model loaded successfully")
@@ -252,12 +281,13 @@ class AutoDeepSeek:
         try:
             full_prompt = self._build_context_prompt(prompt)
 
+            target_device = self._dml_device if self.device == "directml" else self.device
             inputs = self.tokenizer.encode(
                 full_prompt,
                 return_tensors="pt",
                 truncation=True,
                 max_length=1024
-            ).to(self.device)
+            ).to(target_device)
 
             with torch.no_grad():
                 outputs = self.model.generate(
@@ -955,9 +985,9 @@ def main():
     parser.add_argument("--model",
                         default=os.getenv("MODEL_PATH", "Qwen/Qwen2.5-Coder-7B-Instruct"),
                         help="Hugging Face model ID to load")
-    parser.add_argument("--device", choices=["auto", "cuda", "cpu", "mps"],
+    parser.add_argument("--device", choices=["auto", "cuda", "directml", "cpu", "mps"],
                         default=os.getenv("DEVICE", "auto"),
-                        help="Preferred device backend")
+                        help="Preferred device backend (directml for AMD GPUs on Windows)")
     args = parser.parse_args()
 
     full_access_env = os.getenv("FULL_ACCESS", "false").lower() == "true"
